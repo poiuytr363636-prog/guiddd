@@ -1,549 +1,501 @@
---[[
-    WindUI Hub — Performance Monitor + Player Stats
-    Автор: сгенерировано на основе WindUI by Footagesus
-    Требует: WindUI (загружается автоматически)
-]]
+-- ============================================================
+--  Rayfield — Полноценный GUI (Secure Mode)
+--  Документация: https://docs.sirius.menu/rayfield
+-- ============================================================
 
-local RunService   = game:GetService("RunService")
-local Players      = game:GetService("Players")
-local Stats        = game:GetService("Stats")
-local UserInputService = game:GetService("UserInputService")
-local HttpService  = game:GetService("HttpService")
+-- Secure Mode: блокирует все детектируемые ассеты Roblox
+getgenv().RAYFIELD_SECURE    = true
+getgenv().RAYFIELD_ASSET_ID  = 123456789   -- Замените на свой re-uploaded model ID
 
-local cloneref = (cloneref or clonereference or function(i) return i end)
-local ReplicatedStorage = cloneref(game:GetService("ReplicatedStorage"))
+-- Загрузка библиотеки
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 
--- ════════════════════════════════════════════
---  Загрузка WindUI
--- ════════════════════════════════════════════
-local WindUI
-do
-    local ok, result = pcall(function() return require("./src/Init") end)
-    if ok then
-        WindUI = result
-    else
-        if cloneref(RunService):IsStudio() then
-            WindUI = require(cloneref(ReplicatedStorage:WaitForChild("WindUI"):WaitForChild("Init")))
-        else
-            WindUI = loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+-- ============================================================
+--  ОКНО
+-- ============================================================
+
+local Window = Rayfield:CreateWindow({
+    Name             = "My Hub",
+    Icon             = 0,                          -- 0 = без иконки; строка Lucide или число Roblox image ID
+    LoadingTitle     = "My Hub — Loading",
+    LoadingSubtitle  = "Пожалуйста, подождите...",
+    ShowText         = "My Hub",                   -- текст кнопки для мобильных
+
+    Theme            = "Default",                  -- Default / AmberGlow / Bloom / Dark / etc.
+    ToggleUIKeybind  = "RightCtrl",                -- клавиша показа/скрытия GUI
+
+    DisableRayfieldPrompts  = false,
+    DisableBuildWarnings    = false,
+
+    ConfigurationSaving = {
+        Enabled    = true,
+        FolderName = "MyHub",       -- папка в executor filesystem
+        FileName   = "MyHubConfig"  -- имя файла конфига
+    },
+
+    Discord = {
+        Enabled      = false,
+        Invite       = "ABCD1234",  -- discord.gg/ABCD1234
+        RememberJoins = true
+    },
+
+    KeySystem = false,  -- true — включить систему ключей
+    KeySettings = {
+        Title    = "My Hub — Key System",
+        Subtitle = "Введите ключ для доступа",
+        Note     = "Получите ключ на нашем Discord-сервере",
+        FileName = "MyHubKey",
+        SaveKey  = true,
+        GrabKeyFromSite = false,
+        Key      = {"myhub-2024"}
+    }
+})
+
+-- ============================================================
+--  ТАБ 1: Главная
+-- ============================================================
+
+local MainTab = Window:CreateTab("Главная", "house")
+
+-- Параграф с описанием
+local InfoParagraph = MainTab:CreateParagraph({
+    Title   = "Добро пожаловать!",
+    Content = "Это пример полноценного GUI на Rayfield. Используйте вкладки слева для навигации по разделам."
+})
+
+MainTab:CreateDivider()
+
+-- Секция «Статус»
+local StatusSection = MainTab:CreateSection("Статус скрипта")
+
+local StatusLabel = MainTab:CreateLabel("● Скрипт активен", "check-circle", Color3.fromRGB(100, 220, 130), true)
+
+MainTab:CreateDivider()
+
+-- Секция «Быстрые действия»
+local QuickSection = MainTab:CreateSection("Быстрые действия")
+
+local ReloadButton = MainTab:CreateButton({
+    Name = "Перезагрузить конфиг",
+    Callback = function()
+        Rayfield:Notify({
+            Title    = "Конфиг",
+            Content  = "Конфигурация перезагружена",
+            Image    = "refresh-cw",
+            Duration = 3
+        })
+    end
+})
+
+local DestroyButton = MainTab:CreateButton({
+    Name = "Закрыть GUI",
+    Callback = function()
+        Rayfield:Destroy()
+    end
+})
+
+-- ============================================================
+--  ТАБ 2: Игрок
+-- ============================================================
+
+local PlayerTab = Window:CreateTab("Игрок", "user")
+
+-- Секция «Движение»
+local MovementSection = PlayerTab:CreateSection("Движение")
+
+local WalkspeedSlider = PlayerTab:CreateSlider({
+    Name         = "Скорость ходьбы",
+    Range        = {16, 500},
+    Increment    = 1,
+    Suffix       = "units/s",
+    CurrentValue = 16,
+    Flag         = "WalkSpeed",
+    Callback     = function(Value)
+        local char = game.Players.LocalPlayer.Character
+        if char and char:FindFirstChild("Humanoid") then
+            char.Humanoid.WalkSpeed = Value
         end
     end
-end
-
--- ════════════════════════════════════════════
---  Вспомогательные переменные
--- ════════════════════════════════════════════
-local LocalPlayer  = Players.LocalPlayer
-local Camera       = workspace.CurrentCamera
-
--- Цвета
-local Green  = Color3.fromHex("#10C550")
-local Blue   = Color3.fromHex("#257AF7")
-local Purple = Color3.fromHex("#7775F2")
-local Yellow = Color3.fromHex("#ECA201")
-local Red    = Color3.fromHex("#EF4F1D")
-local Grey   = Color3.fromHex("#83889E")
-local Cyan   = Color3.fromHex("#00D4FF")
-
--- ════════════════════════════════════════════
---  Счётчик FPS (скользящее среднее 60 кадров)
--- ════════════════════════════════════════════
-local FPS_SAMPLES = 60
-local fpsBuf, fpsBufIdx, fpsSum = {}, 1, 0
-for i = 1, FPS_SAMPLES do fpsBuf[i] = 60 end
-fpsSum = 60 * FPS_SAMPLES
-
-local currentFPS = 60
-local lastT = tick()
-
-RunService.Heartbeat:Connect(function()
-    local now = tick()
-    local dt  = now - lastT
-    lastT = now
-    if dt <= 0 then return end
-
-    local sample = math.clamp(1 / dt, 0, 1000)
-    fpsSum = fpsSum - fpsBuf[fpsBufIdx] + sample
-    fpsBuf[fpsBufIdx] = sample
-    fpsBufIdx = (fpsBufIdx % FPS_SAMPLES) + 1
-    currentFPS = fpsSum / FPS_SAMPLES
-end)
-
--- ════════════════════════════════════════════
---  Утилиты
--- ════════════════════════════════════════════
-local function getPing()
-    return math.floor(Stats.Network.ServerStatsItem["Data Ping"].Value)
-end
-
-local function getMemoryMB()
-    return math.floor(Stats:GetTotalMemoryUsageMb())
-end
-
-local function getFPS()
-    return math.floor(currentFPS)
-end
-
-local function getPlayerPos()
-    local char = LocalPlayer.Character
-    if not char then return "—" end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not root then return "—" end
-    local p = root.Position
-    return string.format("X:%.1f  Y:%.1f  Z:%.1f", p.X, p.Y, p.Z)
-end
-
-local function getPlayerSpeed()
-    local char = LocalPlayer.Character
-    if not char then return 0 end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if not root then return 0 end
-    return math.floor(root.Velocity.Magnitude)
-end
-
-local function getHealth()
-    local char = LocalPlayer.Character
-    if not char then return 0, 100 end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return 0, 100 end
-    return math.floor(hum.Health), math.floor(hum.MaxHealth)
-end
-
-local function getWalkSpeed()
-    local char = LocalPlayer.Character
-    if not char then return 16 end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return 16 end
-    return math.floor(hum.WalkSpeed)
-end
-
-local function getJumpPower()
-    local char = LocalPlayer.Character
-    if not char then return 50 end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return 50 end
-    return math.floor(hum.JumpPower)
-end
-
-local function fpsColor(fps)
-    if fps >= 55 then return Green
-    elseif fps >= 30 then return Yellow
-    else return Red end
-end
-
-local function pingColor(ping)
-    if ping < 80 then return Green
-    elseif ping < 150 then return Yellow
-    else return Red end
-end
-
--- ════════════════════════════════════════════
---  Создание окна
--- ════════════════════════════════════════════
-local Window = WindUI:CreateWindow({
-    Title       = "Performance Hub",
-    Folder      = "PerfHub",
-    Icon        = "activity",
-    NewElements = true,
-    HideSearchBar = false,
-
-    OpenButton = {
-        Title        = "📊 Perf Hub",
-        CornerRadius = UDim.new(1, 0),
-        StrokeThickness = 2,
-        Enabled      = true,
-        Draggable    = true,
-        OnlyMobile   = false,
-        Scale        = 0.5,
-        Color        = ColorSequence.new(
-            Color3.fromHex("#00D4FF"),
-            Color3.fromHex("#7775F2")
-        ),
-    },
-
-    Topbar = {
-        Height      = 44,
-        ButtonsType = "Mac",
-    },
 })
 
--- Кнопка закрытия клавишей
-Window:SetToggleKey(Enum.KeyCode.RightShift)
-
--- Версия тег
-Window:Tag({
-    Title  = "v1.0",
-    Icon   = "activity",
-    Color  = Color3.fromHex("#1c1c1c"),
-    Border = true,
+local JumpSlider = PlayerTab:CreateSlider({
+    Name         = "Высота прыжка",
+    Range        = {50, 500},
+    Increment    = 5,
+    Suffix       = "units",
+    CurrentValue = 50,
+    Flag         = "JumpPower",
+    Callback     = function(Value)
+        local char = game.Players.LocalPlayer.Character
+        if char and char:FindFirstChild("Humanoid") then
+            char.Humanoid.JumpPower = Value
+        end
+    end
 })
 
--- ════════════════════════════════════════════
---  Секции
--- ════════════════════════════════════════════
-local StatsSection   = Window:Section({ Title = "Мониторинг" })
-local PlayerSection  = Window:Section({ Title = "Игрок" })
-local SettingsSection= Window:Section({ Title = "Настройки" })
+PlayerTab:CreateDivider()
 
--- ════════════════════════════════════════════
---  ТАБ: FPS & Сеть
--- ════════════════════════════════════════════
-do
-    local PerfTab = StatsSection:Tab({
-        Title     = "FPS & Сеть",
-        Icon      = "activity",
-        IconColor = Green,
-        Border    = true,
-    })
+-- Секция «Способности»
+local AbilitySection = PlayerTab:CreateSection("Способности")
 
-    -- ── Live-метки (обновляются каждый кадр) ──
-    local fpsLabel  = PerfTab:Section({ Title = "FPS: —",  TextSize = 28, FontWeight = Enum.FontWeight.Bold })
-    local pingLabel = PerfTab:Section({ Title = "Пинг: —", TextSize = 22 })
-    local memLabel  = PerfTab:Section({ Title = "ОЗУ: — MB",TextSize = 22 })
+local NoclipToggle = PlayerTab:CreateToggle({
+    Name         = "Noclip",
+    CurrentValue = false,
+    Flag         = "Noclip",
+    Callback     = function(Value)
+        -- Логика noclip здесь
+        Rayfield:Notify({
+            Title    = "Noclip",
+            Content  = Value and "Включён" or "Выключен",
+            Image    = Value and "shield-off" or "shield",
+            Duration = 2
+        })
+    end
+})
 
-    PerfTab:Space({ Columns = 2 })
+local InfiniteJumpToggle = PlayerTab:CreateToggle({
+    Name         = "Бесконечный прыжок",
+    CurrentValue = false,
+    Flag         = "InfiniteJump",
+    Callback     = function(Value)
+        -- Логика infinite jump
+    end
+})
 
-    -- История FPS (последние 30 значений)
-    local fpsHistory = {}
-    local fpsHistoryLabel = PerfTab:Section({
-        Title = "История FPS (последние 30 сек):",
-        TextSize = 14,
-        TextTransparency = 0.4,
-    })
+local FlyToggle = PlayerTab:CreateToggle({
+    Name         = "Полёт",
+    CurrentValue = false,
+    Flag         = "Fly",
+    Callback     = function(Value)
+        Rayfield:Notify({
+            Title    = "Полёт",
+            Content  = Value and "Активирован" or "Деактивирован",
+            Image    = "plane",
+            Duration = 2
+        })
+    end
+})
 
-    local historyText = PerfTab:Section({
-        Title = "",
-        TextSize = 13,
-        TextTransparency = 0.3,
-    })
+PlayerTab:CreateDivider()
 
-    PerfTab:Space()
+-- Секция «Внешний вид»
+local AppearanceSection = PlayerTab:CreateSection("Внешний вид")
 
-    -- Статус соединения
-    local connStatus = PerfTab:Section({ Title = "Статус: —", TextSize = 16 })
-
-    -- Интервал обновления
-    local updateInterval = 0.5
-    local elapsed = 0
-    local historyElapsed = 0
-    local histBuf = {}
-
-    RunService.Heartbeat:Connect(function(dt)
-        elapsed = elapsed + dt
-        historyElapsed = historyElapsed + dt
-
-        if elapsed >= updateInterval then
-            elapsed = 0
-
-            local fps  = getFPS()
-            local ping = getPing()
-            local mem  = getMemoryMB()
-
-            -- Обновляем заголовки секций через pcall (они могут быть уничтожены)
-            pcall(function()
-                local fpsStr  = string.format("FPS: %d", fps)
-                local pingStr = string.format("Пинг: %d мс", ping)
-                local memStr  = string.format("ОЗУ: %d МБ", mem)
-
-                -- WindUI не даёт напрямую менять Title у Section после создания,
-                -- поэтому используем Desc (описание) если доступно, иначе пересоздаём.
-                -- Workaround: обновляем через RichText если поддерживается,
-                -- иначе просто выводим в консоль (для отладки).
-                -- Настоящий вывод — через Notify или через Label-элементы.
-
-                -- Попытка через rawset объекта
-                if fpsLabel and fpsLabel.SetTitle then
-                    fpsLabel:SetTitle(fpsStr)
-                elseif fpsLabel and fpsLabel.TitleLabel then
-                    fpsLabel.TitleLabel.Text = fpsStr
+local TransparencySlider = PlayerTab:CreateSlider({
+    Name         = "Прозрачность персонажа",
+    Range        = {0, 100},
+    Increment    = 5,
+    Suffix       = "%",
+    CurrentValue = 0,
+    Flag         = "CharTransparency",
+    Callback     = function(Value)
+        local char = game.Players.LocalPlayer.Character
+        if char then
+            for _, part in ipairs(char:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    part.Transparency = Value / 100
                 end
-                if pingLabel and pingLabel.SetTitle then
-                    pingLabel:SetTitle(pingStr)
-                elseif pingLabel and pingLabel.TitleLabel then
-                    pingLabel.TitleLabel.Text = pingStr
-                end
-                if memLabel and memLabel.SetTitle then
-                    memLabel:SetTitle(memStr)
-                elseif memLabel and memLabel.TitleLabel then
-                    memLabel.TitleLabel.Text = memStr
-                end
-
-                -- Статус соединения
-                local statusStr
-                if ping < 80 then
-                    statusStr = "✅ Соединение: Отличное"
-                elseif ping < 150 then
-                    statusStr = "⚠️ Соединение: Нормальное"
-                else
-                    statusStr = "❌ Соединение: Плохое"
-                end
-                if connStatus and connStatus.TitleLabel then
-                    connStatus.TitleLabel.Text = statusStr
-                end
-            end)
+            end
         end
+    end
+})
 
-        -- История FPS раз в секунду
-        if historyElapsed >= 1 then
-            historyElapsed = 0
-            table.insert(histBuf, getFPS())
-            if #histBuf > 30 then table.remove(histBuf, 1) end
+-- ============================================================
+--  ТАБ 3: Визуал
+-- ============================================================
 
-            pcall(function()
-                local bars = ""
-                for _, v in ipairs(histBuf) do
-                    if v >= 55 then bars = bars .. "█"
-                    elseif v >= 30 then bars = bars .. "▓"
-                    else bars = bars .. "░" end
-                end
-                if historyText and historyText.TitleLabel then
-                    historyText.TitleLabel.Text = bars
-                end
-            end)
+local VisualTab = Window:CreateTab("Визуал", "eye")
+
+-- Секция «ESP»
+local ESPSection = VisualTab:CreateSection("ESP / Подсветка")
+
+local ESPToggle = VisualTab:CreateToggle({
+    Name         = "ESP игроков",
+    CurrentValue = false,
+    Flag         = "PlayerESP",
+    Callback     = function(Value)
+        -- Логика ESP
+    end
+})
+
+local ESPColorPicker = VisualTab:CreateColorPicker({
+    Name     = "Цвет ESP",
+    Color    = Color3.fromRGB(255, 50, 50),
+    Flag     = "ESPColor",
+    Callback = function(Value)
+        -- Обновить цвет ESP
+    end
+})
+
+local ESPDistanceSlider = VisualTab:CreateSlider({
+    Name         = "Дистанция ESP",
+    Range        = {50, 2000},
+    Increment    = 50,
+    Suffix       = "studs",
+    CurrentValue = 500,
+    Flag         = "ESPDistance",
+    Callback     = function(Value)
+        -- Обновить дистанцию ESP
+    end
+})
+
+VisualTab:CreateDivider()
+
+-- Секция «Прицел»
+local CrosshairSection = VisualTab:CreateSection("Прицел")
+
+local CrosshairToggle = VisualTab:CreateToggle({
+    Name         = "Кастомный прицел",
+    CurrentValue = false,
+    Flag         = "CustomCrosshair",
+    Callback     = function(Value)
+        -- Логика прицела
+    end
+})
+
+local CrosshairColor = VisualTab:CreateColorPicker({
+    Name     = "Цвет прицела",
+    Color    = Color3.fromRGB(255, 255, 255),
+    Flag     = "CrosshairColor",
+    Callback = function(Value)
+        -- Обновить цвет прицела
+    end
+})
+
+local CrosshairSizeSlider = VisualTab:CreateSlider({
+    Name         = "Размер прицела",
+    Range        = {5, 50},
+    Increment    = 1,
+    Suffix       = "px",
+    CurrentValue = 15,
+    Flag         = "CrosshairSize",
+    Callback     = function(Value)
+        -- Обновить размер прицела
+    end
+})
+
+VisualTab:CreateDivider()
+
+-- Секция «Интерфейс»
+local UISection = VisualTab:CreateSection("Интерфейс")
+
+local ThemeDropdown = VisualTab:CreateDropdown({
+    Name            = "Тема интерфейса",
+    Options         = {"Default", "AmberGlow", "Bloom", "Dark", "Macintosh", "Ocean"},
+    CurrentOption   = {"Default"},
+    MultipleOptions = false,
+    Flag            = "UITheme",
+    Callback        = function(Options)
+        Rayfield:Notify({
+            Title    = "Тема",
+            Content  = "Выбрана: " .. Options[1],
+            Image    = "palette",
+            Duration = 2
+        })
+    end
+})
+
+-- ============================================================
+--  ТАБ 4: Мир
+-- ============================================================
+
+local WorldTab = Window:CreateTab("Мир", "globe")
+
+-- Секция «Освещение»
+local LightingSection = WorldTab:CreateSection("Освещение")
+
+local BrightnessSlider = WorldTab:CreateSlider({
+    Name         = "Яркость",
+    Range        = {0, 10},
+    Increment    = 1,
+    Suffix       = "",
+    CurrentValue = 2,
+    Flag         = "Brightness",
+    Callback     = function(Value)
+        game.Lighting.Brightness = Value
+    end
+})
+
+local AmbientColor = WorldTab:CreateColorPicker({
+    Name     = "Цвет окружения",
+    Color    = Color3.fromRGB(70, 70, 70),
+    Flag     = "AmbientColor",
+    Callback = function(Value)
+        game.Lighting.Ambient = Value
+    end
+})
+
+local FogDropdown = WorldTab:CreateDropdown({
+    Name            = "Пресет погоды",
+    Options         = {"Ясно", "Туман", "Ночь", "Дождь", "Закат"},
+    CurrentOption   = {"Ясно"},
+    MultipleOptions = false,
+    Flag            = "WeatherPreset",
+    Callback        = function(Options)
+        local preset = Options[1]
+        if preset == "Туман" then
+            game.Lighting.FogEnd   = 200
+            game.Lighting.FogStart = 0
+        elseif preset == "Ночь" then
+            game.Lighting.ClockTime = 0
+        elseif preset == "Закат" then
+            game.Lighting.ClockTime = 18
+        elseif preset == "Ясно" then
+            game.Lighting.FogEnd   = 100000
+            game.Lighting.ClockTime = 14
         end
-    end)
+    end
+})
 
-    -- Кнопка — скопировать stats
-    PerfTab:Space()
-    PerfTab:Button({
-        Title   = "Скопировать статистику",
-        Icon    = "copy",
-        Justify = "Center",
-        Callback = function()
-            local fps  = getFPS()
-            local ping = getPing()
-            local mem  = getMemoryMB()
-            local text = string.format(
-                "FPS: %d | Пинг: %d мс | ОЗУ: %d МБ | Игра: %s | Игрок: %s",
-                fps, ping, mem,
-                game.Name or "Roblox",
-                LocalPlayer.Name
-            )
-            if setclipboard then
-                setclipboard(text)
-                WindUI:Notify({
-                    Title   = "Скопировано!",
-                    Content = text,
-                    Icon    = "check",
-                    Duration = 4,
-                })
-            end
-        end,
-    })
-end
+WorldTab:CreateDivider()
 
--- ════════════════════════════════════════════
---  ТАБ: Игрок
--- ════════════════════════════════════════════
-do
-    local PlayerTab = PlayerSection:Tab({
-        Title     = "Игрок",
-        Icon      = "user",
-        IconColor = Blue,
-        Border    = true,
-    })
+-- Секция «Время»
+local TimeSection = WorldTab:CreateSection("Время суток")
 
-    -- Информация об аккаунте
-    local infoSection = PlayerTab:Section({
-        Title = "Информация об аккаунте",
-        Box   = true,
-        BoxBorder = true,
-        Opened = true,
-    })
+local TimeSlider = WorldTab:CreateSlider({
+    Name         = "Время (0–24)",
+    Range        = {0, 24},
+    Increment    = 1,
+    Suffix       = ":00",
+    CurrentValue = 14,
+    Flag         = "GameTime",
+    Callback     = function(Value)
+        game.Lighting.ClockTime = Value
+    end
+})
 
-    infoSection:Section({ Title = "👤 " .. LocalPlayer.Name, TextSize = 20, FontWeight = Enum.FontWeight.Bold })
-    infoSection:Section({ Title = "🆔 UserID: " .. tostring(LocalPlayer.UserId), TextSize = 15, TextTransparency = 0.3 })
-    infoSection:Section({ Title = "🎭 DisplayName: " .. LocalPlayer.DisplayName, TextSize = 15, TextTransparency = 0.3 })
+WorldTab:CreateDivider()
 
-    -- Подробности игры
-    infoSection:Space()
-    infoSection:Section({ Title = "🎮 " .. (game.Name or "Roblox"), TextSize = 18, FontWeight = Enum.FontWeight.SemiBold })
-    infoSection:Section({ Title = "📋 PlaceID: " .. tostring(game.PlaceId), TextSize = 14, TextTransparency = 0.4 })
-    infoSection:Section({ Title = "🌐 JobID: " .. tostring(game.JobId):sub(1,18) .. "...", TextSize = 13, TextTransparency = 0.4 })
+-- Секция «Гравитация»
+local PhysicsSection = WorldTab:CreateSection("Физика")
 
-    PlayerTab:Space()
+local GravitySlider = WorldTab:CreateSlider({
+    Name         = "Гравитация",
+    Range        = {10, 500},
+    Increment    = 10,
+    Suffix       = "units",
+    CurrentValue = 196,
+    Flag         = "Gravity",
+    Callback     = function(Value)
+        workspace.Gravity = Value
+    end
+})
 
-    -- Живые показатели персонажа
-    local charSection = PlayerTab:Section({
-        Title = "Персонаж",
-        Box   = true,
-        BoxBorder = true,
-        Opened = true,
-    })
+-- ============================================================
+--  ТАБ 5: Настройки
+-- ============================================================
 
-    local hpLabel    = charSection:Section({ Title = "❤️ HP: — / —",     TextSize = 16 })
-    local speedLabel = charSection:Section({ Title = "🏃 Скорость: —",    TextSize = 15, TextTransparency = 0.2 })
-    local posLabel   = charSection:Section({ Title = "📍 Позиция: —",     TextSize = 14, TextTransparency = 0.3 })
-    local wsLabel    = charSection:Section({ Title = "🦵 WalkSpeed: —",   TextSize = 14, TextTransparency = 0.3 })
-    local jpLabel    = charSection:Section({ Title = "⬆️ JumpPower: —",   TextSize = 14, TextTransparency = 0.3 })
+local SettingsTab = Window:CreateTab("Настройки", "settings")
 
-    RunService.Heartbeat:Connect(function()
-        pcall(function()
-            local hp, maxhp = getHealth()
-            local speed = getPlayerSpeed()
-            local pos   = getPlayerPos()
-            local ws    = getWalkSpeed()
-            local jp    = getJumpPower()
+-- Секция «Управление»
+local ControlsSection = SettingsTab:CreateSection("Управление")
 
-            if hpLabel and hpLabel.TitleLabel then
-                hpLabel.TitleLabel.Text    = string.format("❤️ HP: %d / %d", hp, maxhp)
-            end
-            if speedLabel and speedLabel.TitleLabel then
-                speedLabel.TitleLabel.Text = string.format("🏃 Скорость: %d", speed)
-            end
-            if posLabel and posLabel.TitleLabel then
-                posLabel.TitleLabel.Text   = "📍 " .. pos
-            end
-            if wsLabel and wsLabel.TitleLabel then
-                wsLabel.TitleLabel.Text    = string.format("🦵 WalkSpeed: %d", ws)
-            end
-            if jpLabel and jpLabel.TitleLabel then
-                jpLabel.TitleLabel.Text    = string.format("⬆️ JumpPower: %d", jp)
-            end
-        end)
-    end)
+local ToggleKeybind = SettingsTab:CreateKeybind({
+    Name           = "Горячая клавиша GUI",
+    CurrentKeybind = "RightCtrl",
+    HoldToInteract = false,
+    Flag           = "ToggleGUI",
+    Callback       = function(Key)
+        -- вызывается при нажатии клавиши
+        Rayfield:SetVisibility(not Rayfield:IsVisible())
+    end
+})
 
-    PlayerTab:Space()
+local NotifKeybind = SettingsTab:CreateKeybind({
+    Name           = "Тест уведомления",
+    CurrentKeybind = "F9",
+    HoldToInteract = false,
+    Flag           = "TestNotif",
+    Callback       = function()
+        Rayfield:Notify({
+            Title    = "Тест",
+            Content  = "Горячая клавиша уведомления работает!",
+            Image    = "bell",
+            Duration = 3
+        })
+    end
+})
 
-    -- Кнопки действий
-    local actionsSection = PlayerTab:Section({
-        Title = "Действия",
-        Box   = true,
-        BoxBorder = true,
-        Opened = true,
-    })
+SettingsTab:CreateDivider()
 
-    local wsSlider = actionsSection:Slider({
-        Title = "WalkSpeed",
-        Step  = 1,
-        Value = { Min = 0, Max = 500, Default = 16 },
-        Callback = function(v)
-            local char = LocalPlayer.Character
-            if not char then return end
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then hum.WalkSpeed = v end
-        end,
-    })
+-- Секция «Конфиг»
+local ConfigSection = SettingsTab:CreateSection("Конфигурация")
 
-    actionsSection:Space()
+local ConfigNameInput = SettingsTab:CreateInput({
+    Name                    = "Имя профиля",
+    CurrentValue            = "Default",
+    PlaceholderText         = "Введите имя...",
+    RemoveTextAfterFocusLost = false,
+    Flag                    = "ProfileName",
+    Callback                = function(Text)
+        -- Сохранить имя профиля
+    end
+})
 
-    local jpSlider = actionsSection:Slider({
-        Title = "JumpPower",
-        Step  = 1,
-        Value = { Min = 0, Max = 500, Default = 50 },
-        Callback = function(v)
-            local char = LocalPlayer.Character
-            if not char then return end
-            local hum = char:FindFirstChildOfClass("Humanoid")
-            if hum then hum.JumpPower = v end
-        end,
-    })
+local SaveConfigButton = SettingsTab:CreateButton({
+    Name = "Сохранить конфиг",
+    Callback = function()
+        Rayfield:Notify({
+            Title    = "Конфиг",
+            Content  = "Конфигурация сохранена",
+            Image    = "save",
+            Duration = 3
+        })
+    end
+})
 
-    actionsSection:Space()
+local LoadConfigButton = SettingsTab:CreateButton({
+    Name = "Загрузить конфиг",
+    Callback = function()
+        Rayfield:Notify({
+            Title    = "Конфиг",
+            Content  = "Конфигурация загружена",
+            Image    = "folder-open",
+            Duration = 3
+        })
+    end
+})
 
-    actionsSection:Button({
-        Title   = "Сбросить персонажа",
-        Icon    = "refresh-cw",
-        Color   = Red,
-        Justify = "Center",
-        Callback = function()
-            LocalPlayer:LoadCharacter()
-        end,
-    })
+SettingsTab:CreateDivider()
 
-    actionsSection:Space()
+-- Секция «Интерфейс»
+local GUISection = SettingsTab:CreateSection("Интерфейс")
 
-    actionsSection:Button({
-        Title   = "Телепорт в Спавн",
-        Icon    = "map-pin",
-        Justify = "Center",
-        Callback = function()
-            local char = LocalPlayer.Character
-            if not char then return end
-            local root = char:FindFirstChild("HumanoidRootPart")
-            if not root then return end
-            local spawn = workspace:FindFirstChildOfClass("SpawnLocation")
-            if spawn then
-                root.CFrame = spawn.CFrame + Vector3.new(0, 5, 0)
-            else
-                root.CFrame = CFrame.new(0, 10, 0)
-            end
-        end,
-    })
-end
+local ToggleAnimToggle = SettingsTab:CreateToggle({
+    Name         = "Анимации GUI",
+    CurrentValue = true,
+    Flag         = "GUIAnimations",
+    Callback     = function(Value)
+        -- Логика анимаций
+    end
+})
 
--- ════════════════════════════════════════════
---  ТАБ: Настройки
--- ════════════════════════════════════════════
-do
-    local SettingsTab = SettingsSection:Tab({
-        Title     = "Настройки",
-        Icon      = "settings",
-        IconColor = Purple,
-        Border    = true,
-    })
+local NotifToggle = SettingsTab:CreateToggle({
+    Name         = "Показывать уведомления",
+    CurrentValue = true,
+    Flag         = "ShowNotifs",
+    Callback     = function(Value)
+        -- Логика уведомлений
+    end
+})
 
-    SettingsTab:Toggle({
-        Title = "Показать фон панели",
-        Value = not Window.HidePanelBackground,
-        Callback = function(v)
-            Window:SetPanelBackground(v)
-        end,
-    })
+SettingsTab:CreateDivider()
 
-    SettingsTab:Space()
+-- Секция «О программе»
+local AboutSection = SettingsTab:CreateSection("О программе")
 
-    SettingsTab:Keybind({
-        Title = "Клавиша открытия",
-        Value = "RightShift",
-        Callback = function(v)
-            local ok, key = pcall(function() return Enum.KeyCode[v] end)
-            if ok and key then
-                Window:SetToggleKey(key)
-            end
-        end,
-    })
+local AboutParagraph = SettingsTab:CreateParagraph({
+    Title   = "My Hub v1.0",
+    Content = "Сборка: 1.0.0\nРежим: Secure Mode\nДокументация: docs.sirius.menu/rayfield\n\nВсе права защищены."
+})
 
-    SettingsTab:Space()
+-- ============================================================
+--  СТАРТОВОЕ УВЕДОМЛЕНИЕ
+-- ============================================================
 
-    SettingsTab:Dropdown({
-        Title  = "Тема интерфейса",
-        Values = { "Default", "Dark", "Mellowsi", "Rose", "Ocean" },
-        Value  = "Default",
-        Callback = function(theme)
-            pcall(function() Window:SetTheme(theme) end)
-        end,
-    })
-
-    SettingsTab:Space()
-
-    SettingsTab:Button({
-        Title   = "Уничтожить GUI",
-        Icon    = "trash-2",
-        Color   = Red,
-        Justify = "Center",
-        Callback = function()
-            Window:Destroy()
-        end,
-    })
-
-    SettingsTab:Space()
-
-    SettingsTab:Section({
-        Title = "Горячие клавиши:\nRightShift — открыть/закрыть GUI",
-        TextSize = 13,
-        TextTransparency = 0.4,
-    })
-end
-
--- ════════════════════════════════════════════
---  Уведомление при запуске
--- ════════════════════════════════════════════
-task.delay(1.5, function()
-    WindUI:Notify({
-        Title    = "Performance Hub",
-        Content  = "Привет, " .. LocalPlayer.DisplayName .. "! GUI загружен. RightShift — открыть/закрыть.",
-        Icon     = "activity",
-        Duration = 6,
-    })
-end)
+Rayfield:Notify({
+    Title    = "My Hub",
+    Content  = "Скрипт успешно загружен. Добро пожаловать!",
+    Image    = "check-circle",
+    Duration = 5
+})
